@@ -191,18 +191,33 @@ def llm_cases(nodes, count, prompt):
     return [], f"llm_failed:{last_error}"
 
 def fallback_cases(nodes, count):
-    # Transparent local fallback for reproducible demo; swap with a real LLM provider using env configuration.
-    text = " ".join(n.body_text for n in nodes)
-    cases=[]; ids=[n.id for n in nodes]
-    candidates = [
-      ("Overpressure protection", ["A measurement is in progress"], ["Simulate cuff pressure above 299 mmHg", "Observe emergency protection response"], "Inflation stops and the emergency valve vents the cuff within the documented limit."),
-      ("Low battery behavior", ["Battery capacity is below the documented low-battery threshold"], ["Start a measurement", "Observe the display and device response"], "The device follows the documented low-battery indication or error behavior for this version."),
-      ("Cuff leak detection", ["Cuff is disconnected or a leak is introduced"], ["Start a measurement", "Observe the error display"], "The measurement aborts and E1 is displayed."),
-      ("Motion artifact", ["A measurement is in progress"], ["Introduce motion during measurement", "Observe the device response"], "The measurement aborts, E2 is displayed, and a retry is prompted."),
-      ("Versioned content integrity", ["Both document versions are ingested"], ["Retrieve the same logical node from each version", "Compare the content hashes"], "Changed text has a different content hash while the older version remains retrievable.")]
-    for title, pre, steps, expected in candidates[:count]:
-        cases.append({"title": title, "preconditions": pre, "steps": steps, "expected_result": expected, "source_node_ids": ids[:1]})
-    return cases
+    """Deterministic source-aware fallback for a runnable demo without API credentials."""
+    text = " ".join((n.heading + " " + n.body_text) for n in nodes)
+    lower = text.lower()
+    ids = [n.id for n in nodes]
+    candidates = []
+    if "overpressure" in lower or "299 mmhg" in lower or "e3" in lower:
+        candidates.append(("Overpressure protection", ["A measurement is in progress"], ["Simulate cuff pressure above the documented limit", "Observe the error display and venting behavior"], "The device stops inflation, vents the cuff, and displays E3 within the timing specified by the selected source."))
+    if "battery" in lower or "low-battery" in lower or "low battery" in lower:
+        candidates.append(("Battery threshold behavior", ["Battery capacity can be controlled in a test setup"], ["Set remaining battery capacity around the threshold documented in the selected source", "Observe the icon or measurement error"], "The low-battery indication and measurement behavior match the threshold and behavior stated in the selected source."))
+    if "cuff" in lower or "cuﬀ" in lower or "leak" in lower:
+        candidates.append(("Cuff fit or leak behavior", ["A correctly sized cuff and a controllable leak setup are available"], ["Use a cuff condition covered by the selected source", "Start a measurement and observe the device response"], "The device behavior matches the cuff sizing or leak-detection requirement stated in the selected source."))
+    if "motion" in lower or "artifact" in lower or "e2" in lower:
+        candidates.append(("Motion artifact handling", ["A measurement is in progress"], ["Introduce motion during measurement", "Observe the error display and retry prompt"], "The device response matches the motion-artifact behavior documented in the selected source."))
+    if "bluetooth" in lower or "sync" in lower or "e6" in lower:
+        candidates.append(("Bluetooth sync behavior", ["The companion app and device are available"], ["Trigger or simulate a Bluetooth sync failure", "Attempt the next sync and inspect the display"], "The sync-failure behavior matches the selected source; measurement behavior is not changed unless the source says otherwise."))
+    if "storage" in lower or "readings" in lower or "overwritten" in lower:
+        candidates.append(("Reading storage behavior", ["A user profile has stored readings"], ["Fill the selected profile's storage capacity", "Save one additional reading", "Inspect which reading remains stored"], "Storage behavior matches the retention and overwrite policy in the selected source."))
+    # Fill to the required minimum with tests tied to the selected source rather than unrelated device features.
+    excerpt = re.sub(r"\s+", " ", text).strip()[:350]
+    heading = next((n.heading for n in nodes if n.heading), "Selected manual requirement")
+    while len(candidates) < max(3, count):
+        i = len(candidates) + 1
+        candidates.append((f"Requirement verification {i}: {heading}", ["The selected CT-200 requirement is available for verification"],
+                          ["Configure a test setup for the selected requirement", "Execute the documented condition", "Record the observed device behavior"],
+                          f"Observed behavior is checked against the selected source text: {excerpt}"))
+    return [{"title": title, "preconditions": pre, "steps": steps, "expected_result": expected, "source_node_ids": ids}
+            for title, pre, steps, expected in candidates[:count]]
 
 @app.post("/generate")
 def generate(payload: GenerateRequest, db: Session = Depends(get_db)):
