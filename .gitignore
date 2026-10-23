@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+ct200.db
+*.db
+data/generations.json
+.env
